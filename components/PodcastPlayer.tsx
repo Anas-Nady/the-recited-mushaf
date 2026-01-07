@@ -82,12 +82,6 @@ export default function PodcastPlayer({
     return new RegExp(escaped, "i");
   };
 
-  // --- Effects ---
-
-  // --- Effects ---
-
-  // 0. Data Fetching & Caching
-  // 0. Data Fetching
   useEffect(() => {
     const loadEpisodes = async () => {
       if (initialEpisodes.length > 0) return;
@@ -277,8 +271,6 @@ export default function PodcastPlayer({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // --- Audio Events ---
-
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = isMuted ? 0 : volume;
@@ -296,7 +288,6 @@ export default function PodcastPlayer({
       setCurrentTime(time);
       setDuration(audioRef.current.duration || 0);
 
-      // Save to local storage
       if (currentId) {
         localStorage.setItem(
           "podcast_state",
@@ -331,7 +322,6 @@ export default function PodcastPlayer({
     return `${min}:${sec < 10 ? "0" : ""}${sec}`;
   };
 
-  // --- Dynamic Styles ---
   const theme = isDarkMode
     ? {
         bg: "bg-slate-900",
@@ -489,10 +479,7 @@ export default function PodcastPlayer({
                         : r.image
                     }
                     onError={(e) => {
-                      // Fallback if image fails or if it's "تلاوات عامة" and we want a specific logo
                       if (r.name === "تلاوات عامة") {
-                        // You mentioned "add logo of show on page and also on Public Surah تلاوات عامة"
-                        // Assuming the feed image is correct, but if you want to force a logo:
                         (e.target as HTMLImageElement).src =
                           "https://d3t3ozftmdmh3i.cloudfront.net/staging/podcast_uploaded_nologo/33185640/33185640-1699617420698-af08d26cdc989.jpg";
                       }

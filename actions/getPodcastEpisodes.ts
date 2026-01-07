@@ -47,15 +47,11 @@ export async function getPodcastEpisodes(): Promise<Episode[]> {
       let surah = "";
       let reciter = "";
 
-      // 1. Identify Arabic Surah (contains "سورة")
       const arabicSurahIndex = parts.findIndex((p) => p.includes("سورة"));
       if (arabicSurahIndex !== -1) {
         surah = parts[arabicSurahIndex];
       }
 
-      // 2. Identify English Surah (contains "Surah" case-insensitive)
-      // We might use this as a fallback for 'surah' if no Arabic one is found,
-      // but primarily we want to exclude it from 'reciter'.
       const englishSurahIndex = parts.findIndex((p) =>
         p.toLowerCase().includes("surah")
       );
@@ -63,24 +59,20 @@ export async function getPodcastEpisodes(): Promise<Episode[]> {
         surah = parts[englishSurahIndex];
       }
 
-      // 3. The Reciter is whatever is left
       const reciterParts = parts.filter(
         (_, i) => i !== arabicSurahIndex && i !== englishSurahIndex
       );
       reciter = reciterParts.join(" ").trim();
 
-      // Fallback if still empty (e.g. only one part found and it was the Surah)
       if (!surah && parts.length > 0) {
         surah = parts[0];
         reciter = parts.slice(1).join(" ");
       }
 
-      // Group unknown or missing reciters
       if (!reciter || reciter === "القارئ غير معروف" || reciter === "Unknown") {
         reciter = "تلاوات عامة";
       }
 
-      // Extract Audio URL
       const enclosureMatch = content.match(/<enclosure url="(.*?)"/);
       const url = enclosureMatch ? enclosureMatch[1] : "";
 
