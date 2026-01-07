@@ -1,65 +1,117 @@
-import Image from "next/image";
+import PodcastPlayer from "@/components/PodcastPlayer";
 
-export default function Home() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+// Revalidate every hour
+export const revalidate = 3600;
+
+async function getFeed() {
+  const RSS_URL = "https://anchor.fm/s/c665db20/podcast/rss";
+
+  try {
+    const res = await fetch(RSS_URL);
+    if (!res.ok) throw new Error("Failed to fetch RSS");
+    const xmlText = await res.text();
+
+    // Basic Regex Parsing (Better than DOMParser for Node environment without heavy libs)
+    // Warning: Robust production apps should use 'fast-xml-parser' or 'rss-parser' package.
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    const items = [];
+    let match;
+
+    // Default image if specific episode image fails
+    const channelImageMatch = xmlText.match(/<itunes:image href="(.*?)"/);
+    const channelImage = channelImageMatch ? channelImageMatch[1] : "";
+
+    while ((match = itemRegex.exec(xmlText)) !== null) {
+      const content = match[1];
+
+      // Extract Title
+      const titleMatch =
+        content.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) ||
+        content.match(/<title>(.*?)<\/title>/);
+      const fullTitle = titleMatch ? titleMatch[1] : "Unknown Title";
+
+      // Split Title: "Surah Name | Reciter Name" or "Surah Name - Reciter Name"
+      // Normalize separators by replacing " - " with " | " then splitting
+      const parts = fullTitle
+        .replace(/ - /g, " | ")
+        .split("|")
+        .map((s) => s.trim());
+
+      let surah = "";
+      let reciter = "";
+
+      // 1. Identify Arabic Surah (contains "سورة")
+      const arabicSurahIndex = parts.findIndex((p) => p.includes("سورة"));
+      if (arabicSurahIndex !== -1) {
+        surah = parts[arabicSurahIndex];
+      }
+
+      // 2. Identify English Surah (contains "Surah" case-insensitive)
+      // We might use this as a fallback for 'surah' if no Arabic one is found,
+      // but primarily we want to exclude it from 'reciter'.
+      const englishSurahIndex = parts.findIndex((p) =>
+        p.toLowerCase().includes("surah")
+      );
+      if (!surah && englishSurahIndex !== -1) {
+        surah = parts[englishSurahIndex];
+      }
+
+      // 3. The Reciter is whatever is left
+      const reciterParts = parts.filter(
+        (_, i) => i !== arabicSurahIndex && i !== englishSurahIndex
+      );
+      reciter = reciterParts.join(" ").trim();
+
+      // Fallback if still empty (e.g. only one part found and it was the Surah)
+      if (!surah && parts.length > 0) {
+        surah = parts[0];
+        reciter = parts.slice(1).join(" ");
+      }
+
+      // Group unknown or missing reciters
+      if (!reciter || reciter === "القارئ غير معروف" || reciter === "Unknown") {
+        reciter = "تلاوات عامة";
+      }
+
+      // Extract Audio URL
+      const enclosureMatch = content.match(/<enclosure url="(.*?)"/);
+      const url = enclosureMatch ? enclosureMatch[1] : "";
+
+      // Extract GUID (for key)
+      const guidMatch = content.match(/<guid.*?>(.*?)<\/guid>/);
+      const id = guidMatch ? guidMatch[1] : Math.random().toString();
+
+      // Extract Image
+      const imgMatch = content.match(/<itunes:image href="(.*?)"/);
+      const image = imgMatch ? imgMatch[1] : channelImage;
+
+      // Extract Duration
+      const durationMatch = content.match(
+        /<itunes:duration>(.*?)<\/itunes:duration>/
+      );
+      const duration = durationMatch ? durationMatch[1] : "00:00";
+
+      if (url) {
+        items.push({
+          id,
+          title: fullTitle,
+          surah,
+          reciter,
+          url,
+          duration,
+          image,
+        });
+      }
+    }
+
+    return items;
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+export default async function Page() {
+  const episodes = await getFeed();
+  return <PodcastPlayer episodes={episodes} />;
 }
