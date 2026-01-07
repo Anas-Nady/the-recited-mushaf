@@ -10,7 +10,6 @@ import {
   VolumeX,
   Loader2,
   Search,
-  Music,
 } from "lucide-react";
 import { getSurahOrder } from "@/utils/surahOrder";
 import { getPodcastEpisodes } from "@/actions/getPodcastEpisodes";
