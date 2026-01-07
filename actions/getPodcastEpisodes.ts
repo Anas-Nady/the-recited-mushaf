@@ -1,5 +1,3 @@
-"use server";
-
 export type Episode = {
   id: string;
   title: string;
