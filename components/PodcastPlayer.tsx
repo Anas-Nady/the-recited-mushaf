@@ -13,6 +13,7 @@ import {
   Music,
 } from "lucide-react";
 import { getSurahOrder } from "@/utils/surahOrder";
+import { getPodcastEpisodes } from "@/actions/getPodcastEpisodes";
 
 // --- Types ---
 type Episode = {
@@ -26,11 +27,15 @@ type Episode = {
 };
 
 type Props = {
-  episodes: Episode[];
+  episodes?: Episode[];
 };
+const EMPTY_EPISODES: Episode[] = [];
 
-export default function PodcastPlayer({ episodes }: Props) {
+export default function PodcastPlayer({
+  episodes: initialEpisodes = EMPTY_EPISODES,
+}: Props) {
   // --- State ---
+  const [episodes, setEpisodes] = useState<Episode[]>(initialEpisodes);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedReciter, setSelectedReciter] = useState<string>("All");
@@ -54,6 +59,7 @@ export default function PodcastPlayer({ episodes }: Props) {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
 
   const audioRef = useRef<HTMLAudioElement>(null);
+  const shouldSeekRef = useRef<number | null>(null);
 
   // --- Helpers ---
 
@@ -78,8 +84,42 @@ export default function PodcastPlayer({ episodes }: Props) {
 
   // --- Effects ---
 
+  // --- Effects ---
+
+  // 0. Data Fetching & Caching
+  // 0. Data Fetching
+  useEffect(() => {
+    const loadEpisodes = async () => {
+      if (initialEpisodes.length > 0) return;
+
+      // Fetch from Server Action
+      try {
+        const fetchedEpisodes = await getPodcastEpisodes();
+        setEpisodes(fetchedEpisodes);
+      } catch (error) {
+        console.error("Failed to fetch episodes", error);
+      }
+    };
+
+    loadEpisodes();
+  }, [initialEpisodes]);
+
   // 1. Initialize from LocalStorage and URL
   useEffect(() => {
+    // Restore Playback State
+    const savedState = localStorage.getItem("podcast_state");
+    if (savedState) {
+      try {
+        const { id, time } = JSON.parse(savedState);
+        if (id) {
+          setCurrentId(id);
+          shouldSeekRef.current = Math.max(0, time - 5);
+        }
+      } catch (e) {
+        console.error("Failed to parse playback state", e);
+      }
+    }
+
     // Check URL first
     const params = new URLSearchParams(window.location.search);
     const urlReciter = params.get("reciter");
@@ -201,17 +241,13 @@ export default function PodcastPlayer({ episodes }: Props) {
 
   const handlePlayPause = (id: string) => {
     if (currentId === id) {
-      if (isPlaying) {
-        audioRef.current?.pause();
-        setIsPlaying(false);
-      } else {
-        audioRef.current?.play();
-        setIsPlaying(true);
-      }
+      setIsPlaying(!isPlaying);
     } else {
       setCurrentId(id);
       setIsPlaying(true);
       setIsLoadingAudio(true);
+      setCurrentTime(0);
+      shouldSeekRef.current = null;
     }
   };
 
@@ -248,19 +284,35 @@ export default function PodcastPlayer({ episodes }: Props) {
       audioRef.current.volume = isMuted ? 0 : volume;
       if (isPlaying && currentEpisode) {
         audioRef.current.play().catch((e) => console.error("Play Error", e));
+      } else {
+        audioRef.current.pause();
       }
     }
   }, [currentId, isPlaying, volume, isMuted, currentEpisode]);
 
   const onTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
+    if (audioRef.current && !isLoadingAudio) {
+      const time = audioRef.current.currentTime;
+      setCurrentTime(time);
       setDuration(audioRef.current.duration || 0);
+
+      // Save to local storage
+      if (currentId) {
+        localStorage.setItem(
+          "podcast_state",
+          JSON.stringify({ id: currentId, time })
+        );
+      }
     }
   };
 
   const onLoadedData = () => {
     setIsLoadingAudio(false);
+    if (shouldSeekRef.current !== null && audioRef.current) {
+      audioRef.current.currentTime = shouldSeekRef.current;
+      setCurrentTime(shouldSeekRef.current);
+      shouldSeekRef.current = null;
+    }
     if (isPlaying) audioRef.current?.play();
   };
 
@@ -606,9 +658,12 @@ export default function PodcastPlayer({ episodes }: Props) {
             } backdrop-blur-xl border-t shadow-[0_-8px_30px_rgba(0,0,0,0.15)] pb-safe-area transition-colors duration-300`}
           >
             {/* Progress Bar (Attached to top of player) */}
-            <div className="relative w-full h-1.5 bg-slate-200/50 group cursor-pointer">
+            <div
+              className="relative w-full h-1.5 bg-slate-200/50 group cursor-pointer"
+              dir="rtl"
+            >
               <div
-                className="absolute top-0 left-0 h-full bg-emerald-500 rounded-r-full transition-all duration-100"
+                className="absolute top-0 right-0 h-full bg-emerald-500 rounded-l-full transition-all duration-100"
                 style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
               />
               <input
@@ -618,12 +673,13 @@ export default function PodcastPlayer({ episodes }: Props) {
                 value={currentTime}
                 onChange={onSeek}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                dir="rtl"
               />
             </div>
 
-            <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between gap-6">
+            <div className="max-w-4xl mx-auto px-4 md:px-6 py-3 md:py-4 flex flex-col md:flex-row items-center justify-between gap-3 md:gap-6">
               {/* Info Area */}
-              <div className="flex items-center gap-4 w-1/3 overflow-hidden">
+              <div className="flex items-center gap-3 md:gap-4 w-full md:flex-1 min-w-0 overflow-hidden">
                 <img
                   src={currentEpisode.image}
                   className={`w-14 h-14 rounded-xl object-cover shadow-md border border-slate-100/10 ${
@@ -646,33 +702,50 @@ export default function PodcastPlayer({ episodes }: Props) {
               </div>
 
               {/* Controls */}
-              <div className="flex items-center justify-center gap-6 w-1/3">
-                <button
-                  onClick={handleNext}
-                  className={`p-2 ${theme.subText} hover:text-emerald-500 transition-colors`}
+              <div className="w-full md:w-auto flex items-center justify-between md:justify-center gap-3 md:gap-6 flex-none mt-2 md:mt-0">
+                {/* Mobile Time (Right in RTL) */}
+                <div
+                  className="text-[10px] font-mono opacity-70 md:hidden w-[70px] text-right"
+                  dir="ltr"
                 >
-                  <SkipBack size={28} className="fill-current" />{" "}
-                </button>
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </div>
 
-                <button
-                  onClick={() => handlePlayPause(currentId!)}
-                  className="w-14 h-14 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/30 hover:scale-110 active:scale-95 transition-all"
-                >
-                  {isLoadingAudio ? (
-                    <Loader2 size={28} className="animate-spin" />
-                  ) : isPlaying ? (
-                    <Pause size={28} className="fill-current" />
-                  ) : (
-                    <Play size={28} className="ml-1 fill-current" />
-                  )}
-                </button>
+                <div className="flex items-center justify-center gap-6">
+                  {/* Next Button (Left in RTL) */}
+                  <button
+                    onClick={handlePrev}
+                    className={`p-2 ${theme.subText} hover:text-emerald-500 transition-colors`}
+                    title="السابق"
+                  >
+                    <SkipForward size={28} className="fill-current" />
+                  </button>
 
-                <button
-                  onClick={handlePrev}
-                  className={`p-2 ${theme.subText} hover:text-emerald-500 transition-colors`}
-                >
-                  <SkipForward size={28} className="fill-current" />
-                </button>
+                  <button
+                    onClick={() => handlePlayPause(currentId!)}
+                    className="w-14 h-14 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-emerald-500/30 hover:scale-110 active:scale-95 transition-all"
+                  >
+                    {isLoadingAudio ? (
+                      <Loader2 size={28} className="animate-spin" />
+                    ) : isPlaying ? (
+                      <Pause size={28} className="fill-current" />
+                    ) : (
+                      <Play size={28} className="ml-1 fill-current" />
+                    )}
+                  </button>
+
+                  {/* Previous Button (Right in RTL) */}
+                  <button
+                    onClick={handleNext}
+                    className={`p-2 ${theme.subText} hover:text-emerald-500 transition-colors`}
+                    title="التالي"
+                  >
+                    <SkipBack size={28} className="fill-current" />
+                  </button>
+                </div>
+
+                {/* Mobile Spacer (Left in RTL) */}
+                <div className="w-[70px] md:hidden"></div>
               </div>
 
               {/* Volume & Duration (Desktop) */}
@@ -704,6 +777,7 @@ export default function PodcastPlayer({ episodes }: Props) {
                     value={isMuted ? 0 : volume}
                     onChange={(e) => setVolume(Number(e.target.value))}
                     className="w-20 h-1 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                    dir="rtl"
                   />
                 </div>
               </div>
